@@ -3,18 +3,15 @@
  * Louille Glen Benatiro
  * June 2024
  * glenbenatiro@gmail.com
- * */
+ */
 
-// -----------------------------------------------------------------------------
-
-// ESLint Globals
+// ESLint globals
 /* global Session */
 /* global DriveApp */
 /* global GmailApp */
 /* global DocumentApp */
 /* global SpreadsheetApp */
-
-// -----------------------------------------------------------------------------
+/* global GlenSheetsToPDF */
 
 // eslint-disable-next-line vars-on-top, no-unused-vars, no-var
 var GoogleMIMEType = {
@@ -44,7 +41,8 @@ var RowFilterOperator = {
 
 // -----------------------------------------------------------------------------
 
-const GLENMERGE = {
+// eslint-disable-next-line vars-on-top, no-unused-vars, no-var
+var GLENMERGE = {
   DATA_SOURCE_SHEET_HEADER_ROW_NAMES: {
     MERGE_STATUS: 'G Merge Status',
     EMAIL_TRACKING_STATUS: 'Email Tracking Status',
@@ -316,7 +314,7 @@ function setColSelEnableStateObj_(
     temp.isEnabled = true;
   }
 
-  setColSecStateObj_(input, columnSelectorType, temp);
+  setColSecStateObj_(input, columnSelectorType, colSecEnableStateObj);
 }
 
 function getGoogleFileMIMETypeByURL_(url) {
@@ -380,6 +378,8 @@ class GlenMerge {
       headerRow: null,
       hdrObj: null,
       rowFilters: GLENMERGE.DEFAULT_ROW_FILTERS,
+      dataStartRow: null,
+      dataEndRow: null,
     };
 
     this.docMerge_ = {
@@ -400,6 +400,7 @@ class GlenMerge {
         type: null,
       },
       mergeAsPDF: false,
+      glenSheetsToPDF: GlenSheetsToPDF.createInstance(),
     };
 
     this.mailMerge_ = {
@@ -569,11 +570,28 @@ class GlenMerge {
       this.dataSourceSheet_.sheet,
       this.dataSourceSheet_.headerRow,
     );
+
+    return this;
+  }
+
+  getDataSourceSheet() {
+    return this.dataSourceSheet_.sheet;
+  }
+
+  setDataSourceSheetStartRow(row) {
+    this.dataSourceSheet_.dataStartRow = row;
+    return this;
+  }
+
+  setDataSourceSheetEndRow(row) {
+    this.dataSourceSheet_.dataEndRow = row;
+    return this;
   }
 
   // mail merge
   enableDocMerge(bool) {
     this.docMerge_.isEnabled = bool;
+    return this;
   }
 
   setDocMergeTemplateByURL(url) {
@@ -598,6 +616,8 @@ class GlenMerge {
     }
 
     template.type = type;
+
+    return this;
   }
 
   setDocMergeTemplate(file) {
@@ -612,10 +632,12 @@ class GlenMerge {
     this.setDocMergeOutputFolder(
       DriveApp.getFolderById(getGoogleEntityIDFromURL_(url)),
     );
+    return this;
   }
 
   setDocMergeTitle(input, columnSelectorType) {
     setColSecStateObj_(input, columnSelectorType, this.docMerge_.documentTitle);
+    return this;
   }
 
   setDocMergeSharedTo(input, columnSelectorType) {
@@ -628,6 +650,17 @@ class GlenMerge {
 
   setDocMergeAsPDF(bool) {
     this.docMerge_.mergeAsPDF = bool;
+    return this;
+  }
+
+  setDocMergePDFMargins(top, bottom, left, right) {
+    this.docMerge_.glenSheetsToPDF.setMargins(top, bottom, left, right);
+    return this;
+  }
+
+  setDocMergePDFScale(scale) {
+    this.docMerge_.glenSheetsToPDF.setScale(scale);
+    return this;
   }
 
   doDocMergeDocsTemplate_(context) {
@@ -705,7 +738,7 @@ class GlenMerge {
 
     Object.keys(sheetsTemplateTags).forEach((sheetName) => {
       const mergeSheet = mergeSpreadsheet.getSheetByName(sheetName);
-      const mergeSheetData = mergeSheet.getDataRange().getValues();
+      const mergeSheetData = mergeSheet.getDataRange().getDisplayValues();
 
       Object.entries(sheetsTemplateTags[sheetName]).forEach(
         ([key, { row, col }]) => {
@@ -949,19 +982,20 @@ class GlenMerge {
   }
 
   doMerge_() {
-    console.log(`Running merge...`);
-
-    const { sheet } = this.dataSourceSheet_;
-    const lastRow = sheet.getLastRow();
+    const dss = this.dataSourceSheet_;
+    const { sheet } = dss;
     const sheetData = sheet.getDataRange().getDisplayValues();
     const runtimeRowFilters = this.getRuntimeRowFilters();
+    const startRow = dss.dataStartRow ?? dss.headerRow + 1;
+    const endRow = dss.dataEndRow ?? sheet.getLastRow();
 
-    for (
-      let sheetRow = this.dataSourceSheet_.headerRow + 1;
-      sheetRow <= lastRow;
-      sheetRow += 1
-    ) {
-      console.log(`\tProcessing row ${sheetRow}...`);
+    console.log(`Running merge...`);
+    console.log(`Data source sheet: ${sheet.getName()}`);
+    console.log(`Start row: ${startRow}`);
+    console.log(`End row: ${endRow}`);
+
+    for (let sheetRow = startRow; sheetRow <= endRow; sheetRow += 1) {
+      console.log(`\tProcessing row ${sheetRow}/${endRow}...`);
 
       if (!doesRowPassFilters_(sheetRow, sheetData, runtimeRowFilters)) {
         console.log(`\t\tRow does not pass filters. Skipping.`);
