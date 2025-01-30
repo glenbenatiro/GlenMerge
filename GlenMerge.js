@@ -11,7 +11,7 @@
 /* global GmailApp */
 /* global DocumentApp */
 /* global SpreadsheetApp */
-/* global GlenSheetsToPDF */
+/* global GlenSheetsExporter */
 
 // eslint-disable-next-line vars-on-top, no-unused-vars, no-var
 var GoogleMIMEType = {
@@ -124,17 +124,16 @@ function sheetColumnLettersToNumber_(letters) {
   return n;
 }
 
-function convertDocsToPDF_(doc, destFolder) {
+function convertDocsToPDF_(doc) {
   const file = DriveApp.getFileById(doc.getId());
-  const folder = destFolder ?? file.getParents().next();
-  const pdf = DriveApp.createFile(doc.getAs('application/pdf'))
-    .moveTo(folder)
-    .setName(file.getName());
+  const pdf = DriveApp.createFile(doc.getAs('application/pdf')).setName(
+    file.getName(),
+  );
 
   return pdf;
 }
 
-function validateEnum(enumeration, input, enumerationName = 'enum') {
+function validateEnum_(enumeration, input, enumerationName = 'enum') {
   if (Object.values(enumeration).includes(input)) {
     return input;
   }
@@ -262,33 +261,6 @@ function getDocMergeSheetsTemplateTags_(file) {
   return tags;
 }
 
-function convertMergeFileToPDF_(mergeFile) {
-  let pdf = null;
-  const type = mergeFile.getMimeType();
-
-  switch (type) {
-    case GoogleMIMEType.DOCS: {
-      const doc = DocumentApp.openByUrl(mergeFile.getUrl());
-      pdf = convertDocsToPDF_(doc);
-
-      break;
-    }
-
-    case GoogleMIMEType.SHEETS: {
-      const ss = SpreadsheetApp.openByUrl(mergeFile.getUrl());
-      pdf = GlenSheetsToPDF.convert(ss);
-      break;
-    }
-
-    default:
-      throw new Error(`Invalid document merge file type: ${type}`);
-  }
-
-  mergeFile.setTrashed(true);
-
-  return pdf;
-}
-
 function setColSecStateObj_(input, columnSelectorType, colSecStateObj) {
   const temp = colSecStateObj;
 
@@ -296,7 +268,7 @@ function setColSecStateObj_(input, columnSelectorType, colSecStateObj) {
     temp.type = null;
     temp.input = null;
   } else {
-    temp.type = validateEnum(ColumnSelectorType, columnSelectorType);
+    temp.type = validateEnum_(ColumnSelectorType, columnSelectorType);
     temp.input = input;
   }
 }
@@ -400,7 +372,7 @@ class GlenMerge {
         type: null,
       },
       mergeAsPDF: false,
-      glenSheetsToPDF: GlenSheetsToPDF.createInstance(),
+      glenSheetsExporter: GlenSheetsExporter.createService(),
     };
 
     this.mailMerge_ = {
@@ -434,6 +406,37 @@ class GlenMerge {
   }
 
   // ---------------------------------------------------------------------------
+
+  convertMergeFileToPDF_(mergeFile) {
+    let pdf = null;
+    const type = mergeFile.getMimeType();
+
+    switch (type) {
+      case GoogleMIMEType.DOCS: {
+        const doc = DocumentApp.openByUrl(mergeFile.getUrl());
+        pdf = convertDocsToPDF_(doc);
+
+        break;
+      }
+
+      case GoogleMIMEType.SHEETS: {
+        const ss = SpreadsheetApp.openByUrl(mergeFile.getUrl());
+        pdf = this.docMerge_.glenSheetsExporter.exportBySpreadsheet(ss);
+        break;
+      }
+
+      default:
+        throw new Error(`Invalid document merge file type: ${type}`);
+    }
+
+    if (this.docMerge_.destinationFolder) {
+      pdf.moveTo(this.docMerge_.destinationFolder);
+    }
+
+    mergeFile.setTrashed(true);
+
+    return pdf;
+  }
 
   getStateInfo() {
     return {
@@ -486,7 +489,6 @@ class GlenMerge {
     }
   }
 
-  // checks
   isReadyToRun() {
     const errors = [];
 
@@ -552,7 +554,6 @@ class GlenMerge {
     };
   }
 
-  // data source sheet
   getDataSourceSheetHeaderRowObject() {
     return this.dataSourceSheet_.hdrObj;
   }
@@ -588,7 +589,6 @@ class GlenMerge {
     return this;
   }
 
-  // mail merge
   enableDocMerge(bool) {
     this.docMerge_.isEnabled = bool;
     return this;
@@ -654,12 +654,12 @@ class GlenMerge {
   }
 
   setDocMergePDFMargins(top, bottom, left, right) {
-    this.docMerge_.glenSheetsToPDF.setMargins(top, bottom, left, right);
+    this.docMerge_.glenSheetsExporter.setMargins(top, bottom, left, right);
     return this;
   }
 
   setDocMergePDFScale(scale) {
-    this.docMerge_.glenSheetsToPDF.setScale(scale);
+    this.docMerge_.glenSheetsExporter.setScale(scale);
     return this;
   }
 
@@ -768,12 +768,15 @@ class GlenMerge {
       sheetData,
     );
 
+    // very important addition!! this fixes a bug where the last sheet
+    // in a multi sheet spreadsheet would not have the merged values
+    SpreadsheetApp.flush();
+
     mergeSpreadsheet.setName(title);
 
     return mergeSpreadsheet;
   }
 
-  // mail merge
   enableMailMerge(bool) {
     this.mailMerge_.isEnabled = bool;
   }
@@ -884,7 +887,6 @@ class GlenMerge {
     GmailApp.sendEmail(recipient, subject, body, options);
   }
 
-  // row filters
   addRowFilter(input, columnSelectorType, operator, rowContent) {
     const rowFilter = {
       type: columnSelectorType,
@@ -929,7 +931,6 @@ class GlenMerge {
     }, []);
   }
 
-  // run
   createMergeFile_(sheetRow, sheetData) {
     let file = null;
 
@@ -1008,7 +1009,7 @@ class GlenMerge {
           mergeFile = this.createMergeFile_(sheetRow, sheetData);
 
           if (this.docMerge_.mergeAsPDF) {
-            mergeFile = convertMergeFileToPDF_(mergeFile);
+            mergeFile = this.convertMergeFileToPDF_(mergeFile);
           }
         }
 
@@ -1042,7 +1043,7 @@ class GlenMerge {
 
 // =============================================================================
 
-function createInstance() {
+function createService() {
   return new GlenMerge();
 }
 
